@@ -639,7 +639,7 @@ be performed manually and the cmdb version manually updated
         [/#if]
 
         [#-- Copy the solutionsv2 tree from config to infrastructure and rename --]
-        [#local solutionsv2Dir = (listDirectoriesInDirectory(infrastructureDir.File, "solutionsv2")[0])!{} ]
+        [#local solutionsv2Dir = (listDirectoriesInDirectory(configDir, "solutionsv2")[0])!{} ]
         [#if solutionsv2Dir?has_content]
             [#local targetDir = formatAbsolutePath(infrastructureDir.File, "solutions") ]
             [#local result += {"Log" : result.Log + logSeparator("Copy solutionsv2 tree " + solutionsv2Dir.File + " to " + targetDir) } ]
@@ -670,6 +670,10 @@ be performed manually and the cmdb version manually updated
         [#-- Clean the settings tree --]
         [#local result += {"Log" : result.Log + logSeparator("Clean settings tree " + configDir) } ]
         [#local result = deleteFiles(result, buildFiles, action, dryrun) ]
+        [#if progressIsNotOK(result)]
+            [#return result]
+        [/#if]
+        [#local result = deleteEmptyDirectories(result, configDir, action, dryrun) ]
         [#if progressIsNotOK(result)]
             [#return result]
         [/#if]
@@ -1349,14 +1353,14 @@ Log alert
 Find file matches in directory tree
 --]
 [#function findFileMatches rootDir options={} ]
-    [#return findCMDBMatches(rootDir, [], options, {"FilesOnly" : true}) ]
+    [#return findCMDBMatches(rootDir, [], options, {"IgnoreDirectories" : true}) ]
 [/#function]
 
 [#--
 Find directory matches in directory tree
 --]
 [#function findDirectoryMatches rootDir options={} ]
-    [#return findCMDBMatches(rootDir, [], options, {"DirectoriesOnly" : true}) ]
+    [#return findCMDBMatches(rootDir, [], options, {"IgnoreFiles" : true}) ]
 [/#function]
 
 [#--
@@ -1376,15 +1380,15 @@ Find directories in directory tree
 [#--
 Find matches in directory
 --]
-[#function listMatchesInDirectory rootDir ]
-    [#return findCMDBMatches(rootDir, [], { "MinDepth" : 1, "MaxDepth" : 1 }) ]
+[#function listMatchesInDirectory rootDir options={} ]
+    [#return findCMDBMatches(rootDir, [], options+ { "MinDepth" : 1, "MaxDepth" : 1 }) ]
 [/#function]
 
 [#--
 List files in directory
 --]
-[#function listFilesInDirectory rootDir glob="" ]
-    [#return findFiles(rootDir, glob, { "MinDepth" : 1, "MaxDepth" : 1 }) ]
+[#function listFilesInDirectory rootDir glob="" options={} ]
+    [#return findFiles(rootDir, glob, options + { "MinDepth" : 1, "MaxDepth" : 1 }) ]
 [/#function]
 
 [#--
@@ -1449,8 +1453,7 @@ Copy file
 
     [#local description = from.File + " to " + to.File]
 
-    [#local existingFile = (listFilesInDirectory(to.Path, to.Filename)[0])!{} ]
-    [#--local existingFile = (listFilesInDirectory(to.Path, "unknown")[0])!{} --]
+    [#local existingFile = (listFilesInDirectory(to.Path, to.Filename, {"IgnoreDotFiles" : false, "IgnoreDotDirectories" : false} )[0])!{} ]
     [#if existingFile?has_content ]
         [#-- confirm the content is the same - otherwise it is likely an error --]
         [#if existingFile.Content == from.Content]
@@ -1532,7 +1535,17 @@ Copy files in directory
 Copy directory tree
 --]
 [#function copyDirectoryTree progress fromDir toDir action dryrun failOnContentMismatch=true]
-    [#return copyFiles(progress findfiles(fromDir), fromDir, toDir, action, dryrun, failOnContentMismatch) ]
+    [#return
+        copyFiles(
+            progress,
+            findFiles(fromDir, "", {"IgnoreDotFiles" : false, "IgnoreDotDirectories" : false}),
+            fromDir,
+            toDir,
+            action,
+            dryrun,
+            failOnContentMismatch
+        )
+    ]
 [/#function]
 
 [#--
@@ -1596,6 +1609,26 @@ Delete directory
     [#return addToProgressLog(result, logStatusEntry("Deltree", fromDir, getProgressStatus(result))) ]
 [/#function]
 
+[#-- Remove empty directories --]
+[#function deleteEmptyDirectories progress fromDir action dryrun]
+
+    [#local result = setProgressOK(progress) ]
+
+    [#local directories = findDirectories(fromDir, "", {"IgnoreDotDirectories" : false})?sort_by("File")?reverse ]
+
+    [#list directories as directory]
+        [#local matches = listMatchesInDirectory(directory.File, {"IgnoreDotFiles" : false, "IgnoreDotDirectories" : false}) ]
+        [#if matches?size == 0 ]
+            [#local result = deleteDirectory(result, directory.File, action, dryrun) ]
+            [#if progressIsNotOK(result) ]
+                [#break]
+            [/#if]
+        [/#if]
+    [/#list]
+
+    [#return result]
+[/#function]
+
 [#--
 Move file
 --]
@@ -1633,7 +1666,23 @@ Move files in directory
 Move directory tree
 --]
 [#function moveDirectoryTree progress fromDir toDir action dryrun failOnContentMismatch=true]
-    [#return moveFiles(progress, findFiles(fromDir), fromDir, toDir, action, dryrun, failOnContentMismatch) ]
+    [#-- Move all the files --]
+    [#local result =
+        moveFiles(
+            progress,
+            findFiles(fromDir, "", {"IgnoreDotFiles" : false, "IgnoreDotDirectories" : false}),
+            fromDir,
+            toDir,
+            action,
+            dryrun,
+            failOnContentMismatch) ]
+    [#if progressIsNotOK(result) ]
+        [#return result]
+    [/#if]
+
+    [#-- Remove any empty directories that result --]
+    [#return deleteEmptyDirectories(result, fromDir, action, dryrun) ]
+
 [/#function]
 
 [#-- Write file --]

@@ -12,8 +12,6 @@
     [#assign cmdbCacheAll = cacheAll ]
 [/#macro]
 
-[#-- Helpers --]
-
 [#-- Common filtering on the results of a CMDB query --]
 [#function filterCMDBMatches matches filters={} ]
     [#if ! filters?has_content]

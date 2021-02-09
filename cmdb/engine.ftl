@@ -34,11 +34,12 @@ Match Filter
 }
 
 The "onetoone" behaviour requires that a value of each attribute of the Match Filter
-must match a value of the same named attribute in the Context Filter, or
-the attribute must be absent from the Context Filter.
+must match a value of the same named attribute in the Context Filter. The Match
+Filter is thus a subset of the Context Filter.
 
 Context Filter
 {
+    "Product" : ["ics"],
     "Environment" : ["prod"]
     "Segment" : ["default"]
 }
@@ -52,10 +53,23 @@ Match Filter
     "Segment" : ["e7", "default"]
 }
 
+but the Context Filter
+{
+    "Environment" : ["prod"]
+    "Segment" : ["default"]
+}
+
+does not match.
+
+The "exactonetoone" behaviour uses the same match logic as "onetoone", but
+also checks that the Context Filter doesn't have any attributes that
+are not included in the Match Filter
+
 --]
 
 [#assign ANY_FILTER_MATCH_BEHAVIOUR = "any"]
 [#assign ONETOONE_FILTER_MATCH_BEHAVIOUR = "onetoone"]
+[#assign EXACTLY_ONETOONE_FILTER_MATCH_BEHAVIOUR = "exactlyonetoone"]
 
 [#function isValidFilter filter ]
     [#return filter?is_hash]
@@ -77,19 +91,30 @@ Match Filter
             [#break]
 
         [#case ONETOONE_FILTER_MATCH_BEHAVIOUR]
+        [#case EXACTLY_ONETOONE_FILTER_MATCH_BEHAVIOUR]
             [#list matchFilter as key,value]
                 [#if !(contextFilter[key]?has_content)]
-                    [#continue]
+                    [#return false]
                 [/#if]
                 [#if !getArrayIntersection(contextFilter[key],value)?has_content]
                     [#return false]
                 [/#if]
             [/#list]
+            [#-- Filters must have the same attributes --]
+            [#if
+                (matchBehaviour == EXACTLY_ONETOONE_FILTER_MATCH_BEHAVIOUR) &&
+                removeObjectAttributes(contextFilter, matchFilter?keys)?has_content]
+                [#return false]
+            [/#if]
             [#return true]
             [#break]
+
+            [#-- Unknown behaviour --]
+            [#default]
+            [#return false]
     [/#switch]
 
-    [#-- Unknown behaviour --]
+    [#-- Filters don't match --]
     [#return false]
 [/#function]
 

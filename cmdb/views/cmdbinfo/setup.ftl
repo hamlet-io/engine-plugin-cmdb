@@ -24,7 +24,7 @@
         [#local tenant = tenants[0] ]
     [/#if]
 
-    [#-- Create the CMDB filter --]
+    [#-- Create the contextfilter --]
     [#local contextFilter =
         {
             "Tenant" : combineEntities(commandLineOptions.Layers.Tenant?split("|"), arrayIfContent(tenant, tenant), UNIQUE_COMBINE_BEHAVIOUR),
@@ -60,7 +60,7 @@
     [#local productContent = getCMDBProductContent(tenant, product, cacheResults) ]
     [#local segmentContent = getCMDBSegmentContent(tenant, product, environment, segment, cacheResults) ]
 
-    [#-- Qualified content --]
+    [#-- Content qualified with the contextFilter --]
 
     [#local qualifiedTenantContent = qualifyEntity(tenantContent, contextFilter) ]
     [#local qualifiedAccountContent = qualifyEntity(accountContent, contextFilter) ]
