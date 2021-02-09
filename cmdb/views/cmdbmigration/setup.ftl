@@ -23,7 +23,8 @@
     [#list cmdbs as cmdb]
         [#-- Perform migrations --]
         [#if actions?seq_contains("upgrade") ]
-            [#local result = internalMigrateCmdb(cmdb, INTERNAL_CMDB_UPGRADE, commandLineOptions.CMDB.Dryrun) ]
+            [#local cmdbState = getCMDBs({"ActiveOnly" : false})?filter(entry -> cmdb.Name == entry.Name)[0] ]
+            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_UPGRADE, commandLineOptions.CMDB.Dryrun) ]
             [@addToDefaultScriptOutput getProgressLog(result) /]
             [#if progressIsNotOK(result) ]
                 [#return]
@@ -32,7 +33,8 @@
 
         [#-- Perform cleanup --]
         [#if actions?seq_contains("cleanup") ]
-            [#local result = internalMigrateCmdb(cmdb, INTERNAL_CMDB_CLEANUP, commandLineOptions.CMDB.Dryrun) ]
+            [#local cmdbState = getCMDBs({"ActiveOnly" : false})?filter(entry -> cmdb.Name == entry.Name)[0] ]
+            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_CLEANUP, commandLineOptions.CMDB.Dryrun) ]
             [@addToDefaultScriptOutput getProgressLog(result) /]
             [#if progressIsNotOK(result) ]
                 [#return]
@@ -53,10 +55,23 @@
 
     [#local result = createProgressIndicator() ]
 
+    [#--
+    Migrations from the following earlier versions have been ported from
+    the bash implementation, but not extensively tested as there is no
+    known use of them with current users.
+
+    Should this prove to not be the case, the minimum current accepted
+    version can be extended to the values below but testing using dryrun
+    is recommended to confirm correct migration logic.
+
+    "Upgrade" : ["v1.0.0", "v1.1.0", "v1.2.0", "v1.3.0", "v1.3.1", "v1.3.2"]
+    "Cleanup" : ["v1.0.0", "v1.1.0", "v1.1.1"]
+    --]
+
     [#local migrationOrder =
         {
-            "Upgrade" : ["v1.0.0", "v1.1.0", "v1.2.0", "v1.3.0", "v1.3.1", "v1.3.2", "v2.0.0", "v2.0.1"],
-            "Cleanup" : ["v1.0.0", "v1.1.0", "v1.1.1", "v2.0.0"]
+            "Upgrade" : ["v1.3.2", "v2.0.0", "v2.0.1"],
+            "Cleanup" : ["v1.1.1", "v2.0.0"]
         } ]
 
     [#-- Access current .cmdb file --]

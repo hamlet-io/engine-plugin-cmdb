@@ -25,10 +25,10 @@
         "CMDB" : {
           "Names" : cmdbs!"",
           "Version" : {
-            "Upgrade" : upgrade!"v1.3.2",
-            "Cleanup" : cleanup!"v1.1.1"
+            "Upgrade" : upgrade!"v2.0.1",
+            "Cleanup" : cleanup!"v2.0.0"
           },
-          "Actions" : (actions!"upgrade")?lower_case,
+          "Actions" : (actions!"upgrade|cleanup")?lower_case,
           "Dryrun" : valueIfContent(" (dryrun)", dryrun!"", "")
         }
       }

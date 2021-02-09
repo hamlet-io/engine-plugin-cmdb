@@ -23,7 +23,7 @@ They should be run from the directory where the cmdbs repos has been checked out
 
   Available parameters are
   - cmdbs - a `|` separated list of cmdbs to be processed via the `cmdbs` action
-  - actions - controls the output produced
+  - actions - a `|` separated list of actions to perform in the order they are provided
     - `inputs` - show the layer values being used
     - `lists` - show the layer values available in the cmdb
     - `context` - show the context filter being used to qualify content
@@ -49,12 +49,12 @@ They should be run from the directory where the cmdbs repos has been checked out
 
   Available parameters
   - cmdbs - a `|` separated list of cmdbs to be processed
-  - actions - controls the output produced
+  - actions - a `|` separated list of actions to perform in the order they are provided
     - `upgrade` - perform cmdb upgrade
     - `cleanup` - perform cmdb cleanup
   - `upgrade` - version to upgrade to
   - `cleanup` - version to cleanup to
-  - `dryrun` - don't actually perform the migration but show what would be done if it were
+  - `dryrun` - don't perform the migration but produce the log to show what would be done if it were
 
 ## Installation
 
