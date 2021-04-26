@@ -12,26 +12,42 @@
     [#assign cmdbCacheAll = cacheAll ]
 [/#macro]
 
-[#-- Common filtering on the results of a CMDB query --]
+[#-- Common filtering on the results of a CMDB query                                  --]
+[#-- filters can contain multiple boolean based attributes which are applied in turn  --]
+[#-- IgnoreFiles and IgnoreDirectories are normally provided as options to the search --]
+[#-- but were originally implemented as filters after searching.                      --]
+[#--
+Filters that don't change the entry content are
+- IgnoreFiles - don't return files
+- IgnoreDirectories - don't return directories
+- ContentOnly - only return entries where the file is non-zero in length
+- JSONContentOnly - only return entries where the file has JSON formatted content
+- IncludeContentOnly - only return entries where the file is a Freemarker template
+
+Filters that change the content are
+- SuppressContent - Replace "Content" and "JSONContent" with boolean indicating content presence
+- FilenamesOnly - only return the filename as on object
+- FlattenedFilenamesOnly - only return the filename as a string
+--]
 [#function filterCMDBMatches matches filters={} ]
     [#if ! filters?has_content]
         [#return matches]
     [/#if]
     [#local result = matches]
     [#if filters.IgnoreFiles!false]
-        [#local result = internalFilterCMDBIgnoreFiles(result)]
+        [#local result = result?filter(match -> match.IsDirectory) ]
     [/#if]
     [#if filters.IgnoreDirectories!false]
-        [#local result = internalFilterCMDBIgnoreDirectories(result)]
+        [#local result = result?filter(match -> !match.IsDirectory) ]
     [/#if]
     [#if filters.ContentOnly!false]
-        [#local result = internalFilterCMDBContentOnly(result)]
+        [#local result = result?filter(match -> match.Contents?has_content) ]
     [/#if]
     [#if filters.JSONContentOnly!false]
-        [#local result = internalFilterCMDBJSONContentOnly(result)]
+        [#local result = result?filter(match -> match.ContentsAsJSON?has_content) ]
     [/#if]
     [#if filters.IncludeContentOnly!false]
-        [#local result = internalFilterCMDBIncludesOnly(result)]
+        [#local result = result?filter(match -> match.IsTemplate!false) ]
     [/#if]
     [#if filters.SuppressContent!false]
         [#local result = internalFilterCMDBSuppressContent(result)]
@@ -46,19 +62,23 @@
 [/#function]
 
 [#-- Base function for looking up matches in the cmdb file system --]
-[#--]
-Options are
-- MinDepth - how deep to go before searching relative to path
-- MaxDepth - how deep to go before stopping searching relative to path
+[#--
+Options (provided by underlying getCMDBTree() function) are
+- MinDepth - how deep to go before starting search ( relative to path (=1) )
+- MaxDepth - how deep to go before stopping search ( relative to path (=1) )
 - StopAfterFirstMatch(false) - at most one result returned
 - IgnoreSubtreeAfterMatch(false) - only one match per directory tree
 - FilenameGlob - glob pattern that file/directory names must match
 - AddStartingWildcard(true) - add ".*" between path and regex (if not "^" anchored)
 - AddEndingWildcard(true) - add ".*" after regex (if not "$" anchored)
-- Regex - array of regex patterns to match
+- Regex - array of regex patterns to match (path ignored if "^" anchored)
 - IgnoreDotDirectories(true) - don't search directories starting with "."
 - IgnoreDotFiles(true) : don't include files starting with "."
+- IgnoreDirectories(false) - don't return directories
+- IgnoreFiles(false) - don't return files
 - IncludeCMDBInformation(false) - include CMDB information in each match result
+
+Filters are as per filterCMDBMatches()
 --]
 [#function findCMDBMatches path alternatives=[] options={} filters={} ]
 
@@ -67,8 +87,10 @@ Options are
         [#return [] ]
     [/#if]
 
-    [#-- Construct alternate paths --]
-    [#-- Alternatives can be arrays of values to be converted into a relative path --]
+    [#-- Construct alternate paths as an array of regex patterns                --]
+    [#-- Each alternative can be a single value or an array of values           --]
+    [#-- If an array, the alternative values are converted into a relative path --]
+    [#-- Note that alternative values can be regex fragments                    --]
     [#local regex = [] ]
     [#list asArray(alternatives) as alternative]
         [#local alternativePath = formatRelativePath(alternative)]
@@ -77,9 +99,11 @@ Options are
         [/#if]
     [/#list]
 
-    [#-- Find matches --]
     [#return
+        [#-- Apply post search filters to the search results --]
         filterCMDBMatches(
+            [#-- Find matches --]
+            [#-- If path is an array of values, they are formatted as a path --]
             getCMDBTree(
                 formatAbsolutePath(path),
                 options +
@@ -137,10 +161,14 @@ Options are
         ) ]
         [#local tenants = cmdbCache.Tenants]
     [#else]
-        [#local cmdbPath = internalFindFirstCMDBPath(["tenant", "accounts"])]
+        [#local cmdbPath = internalFindFirstCMDBByName(["tenant", "accounts"])]
         [#if cmdbPath?has_content]
+            [#-- There is a tenant or account cmdb. Look only in it for the tenant             --]
+            [#-- TODO(mfl) This is a temporary optimisation to speed up the search for tenants --]
+            [#-- It should be reconsidered once dynamic loading is more mature                 --]
             [#local tenants = internalAnalyseTenantStructure(cmdbPath, tenant, {"MaxDepth" : 2} ) ]
         [#else]
+            [#-- Broaden the hunt for tenants --]
             [#local tenants = internalAnalyseTenantStructure(path, tenant) ]
         [/#if]
         [#assign cmdbCache =
@@ -170,8 +198,13 @@ Options are
             ) ]
             [#local accounts = tenantStructure.Accounts ]
         [#else]
+            [#-- By default, look for accounts within CMDB where the tenant was found --]
             [#local startingPath = tenantStructure.Paths.CMDB]
-            [#local cmdbPath = internalFindFirstCMDBPath(["accounts"])]
+
+            [#-- As an optimisation, check for an explicit CMDB for accounts                  --]
+            [#-- TODO(mfl) if accounts are always located under the tenant, this optimisation --]
+            [#-- could be removed                                                             --]
+            [#local cmdbPath = internalFindFirstCMDBByName(["accounts"])]
             [#if cmdbPath?has_content]
                 [#local startingPath = cmdbPath]
             [/#if]
@@ -219,9 +252,10 @@ Options are
                 )
             ]
         [#else]
+            [#-- TODO(mfl) Enable this when product content reliably under the tenant --]
             [#--
             [#local startingPath = (tenantStructure.Paths.CMDB)!""]
-            [#local cmdbPath = internalFindFirstCMDBPath(product)]
+            [#local cmdbPath = internalFindFirstCMDBByName(product)]
             [#if cmdbPath?has_content]
                 [#local startingPath = cmdbPath]
             [/#if]
@@ -408,17 +442,17 @@ Options are
     [#return result]
 [/#function]
 
-[#function analyseCMDBAccountFiles tenant account filters={} cacheResult=false ]
+[#function analyseCMDBAccountFiles tenant account region filters={} cacheResult=false ]
     [#-- Check cache --]
     [#if cmdbCacheAll || cacheResult]
-        [#local result = getCMDBCacheAccountSection(tenant, account, ["Files"]) ]
+        [#local result = getCMDBCacheAccountSection(tenant, account, ["Regions", region, "Files"]) ]
         [#if result?has_content]
             [#return result]
         [/#if]
     [/#if]
 
     [#-- Analyse files --]
-    [#local result = internalAssembleCMDBAccountFiles(tenant, account, filters) ]
+    [#local result = internalAssembleCMDBAccountFiles(tenant, account, region, filters) ]
     [#if cmdbCacheAll || cacheResult]
         [#assign cmdbCache =
             addToCache(
@@ -428,7 +462,11 @@ Options are
                         tenant : {
                             "Accounts" : {
                                 account : {
-                                    "Files" : result
+                                    "Regions" : {
+                                        region : {
+                                            "Files" : result
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -472,17 +510,17 @@ Options are
     [#return result]
 [/#function]
 
-[#function analyseCMDBSegmentFiles tenant product environment segment filters={} cacheResult=false ]
+[#function analyseCMDBSegmentFiles tenant product environment segment account region filters={} cacheResult=false ]
     [#-- Check cache --]
     [#if cmdbCacheAll || cacheResult]
-        [#local result = getCMDBCacheSegmentSection(tenant, product, environment, segment, ["Files"]) ]
+        [#local result = getCMDBCacheSegmentSection(tenant, product, environment, segment, ["Accounts", account, "Regions", region, "Files"]) ]
         [#if result?has_content]
             [#return result]
         [/#if]
     [/#if]
 
     [#-- Analyse files --]
-    [#local result = internalAssembleCMDBSegmentFiles(tenant, product, environment, segment, filters) ]
+    [#local result = internalAssembleCMDBSegmentFiles(tenant, product, environment, segment, account, region, filters) ]
     [#if cmdbCacheAll || cacheResult]
         [#assign cmdbCache =
             addToCache(
@@ -496,7 +534,15 @@ Options are
                                         environment : {
                                             "Segments" : {
                                                 segment : {
-                                                    "Files" : result
+                                                    "Accounts" : {
+                                                        account : {
+                                                            "Regions" : {
+                                                                region : {
+                                                                    "Files" : result
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -528,7 +574,9 @@ Options are
     [#-- Assemble content --]
     [#local result =
         {
-            "Blueprint" : internalAssembleCMDBBlueprint(files.Blueprint)
+            "Blueprint" : internalAssembleCMDBBlueprint(files.Blueprint),
+            "Modules" : files.Modules,
+            "Extensions" : files.Extensions
         }
     ]
     [#if cmdbCacheAll || cacheResult]
@@ -548,24 +596,26 @@ Options are
     [#return result]
 [/#function]
 
-[#function getCMDBAccountContent tenant account cacheResult=false ]
+[#function getCMDBAccountContent tenant account region cacheResult=false ]
     [#-- Check cache --]
     [#if cmdbCacheAll || cacheResult]
-        [#local result = getCMDBCacheAccountSection(tenant, account, ["Content"]) ]
+        [#local result = getCMDBCacheAccountSection(tenant, account, ["Regions", region, "Content"]) ]
         [#if result?has_content]
             [#return result]
         [/#if]
     [/#if]
 
     [#-- Assemble files --]
-    [#local files = analyseCMDBAccountFiles(tenant, account, {}, cacheResult) ]
+    [#local files = analyseCMDBAccountFiles(tenant, account, region, {}, cacheResult) ]
 
     [#-- Assemble content --]
     [#local result =
         {
             "Blueprint" : internalAssembleCMDBBlueprint(files.Blueprint),
             "Settings" : internalAssembleCMDBSettings(files.Settings),
-            "StackOutputs" : internalAssembleCMDBStackOutputs(files.StackOutputs)
+            "Stacks" : files.Stacks,
+            "Modules" : files.Modules,
+            "Extensions" : files.Extensions
         }
     ]
     [#if cmdbCacheAll || cacheResult]
@@ -577,7 +627,11 @@ Options are
                         tenant : {
                             "Accounts" : {
                                 account : {
-                                    "Content" : result
+                                    "Regions" : {
+                                        region : {
+                                            "Content" : result
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -604,8 +658,10 @@ Options are
     [#-- Assemble content --]
     [#local result =
         {
-            "Blueprint" : internalAssembleCMDBBlueprint(files.Blueprint)
-        }
+            "Blueprint" : internalAssembleCMDBBlueprint(files.Blueprint),
+            "Modules" : files.Modules,
+            "Extensions" : files.Extensions
+         }
     ]
     [#if cmdbCacheAll || cacheResult]
         [#assign cmdbCache =
@@ -628,26 +684,27 @@ Options are
     [#return result]
 [/#function]
 
-[#function getCMDBSegmentContent tenant product environment segment cacheResult=false ]
+[#function getCMDBSegmentContent tenant product environment segment account region cacheResult=false ]
     [#-- Check cache --]
     [#if cmdbCacheAll || cacheResult]
-        [#local result = getCMDBCacheSegmentSection(tenant, product, environment, segment, ["Content"]) ]
+        [#local result = getCMDBCacheSegmentSection(tenant, product, environment, segment, ["Accounts", account, "Regions", region, "Content"]) ]
         [#if result?has_content]
             [#return result]
         [/#if]
     [/#if]
 
     [#-- Assemble files --]
-    [#local files = analyseCMDBSegmentFiles(tenant, product, environment, segment, {}, cacheResult) ]
+    [#local files = analyseCMDBSegmentFiles(tenant, product, environment, segment, account, region, {}, cacheResult) ]
 
     [#-- Assemble content --]
     [#local result =
         {
             "Blueprint" : internalAssembleCMDBBlueprint(files.Blueprint),
             "Settings" : internalAssembleCMDBSettings(files.Settings),
-            "StackOutputs" : internalAssembleCMDBStackOutputs(files.StackOutputs),
+            "Stacks" : files.Stacks,
+            "Definitions" : internalAssembleCMDBDefinitions(files.Definitions),
             "Fragments" : internalAssembleCMDBFragments(files.Fragments)
-        }
+         }
     ]
     [#if cmdbCacheAll || cacheResult]
         [#assign cmdbCache =
@@ -662,52 +719,13 @@ Options are
                                         environment : {
                                             "Segments" : {
                                                 segment : {
-                                                    "Content" : result
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            )
-        ]
-    [/#if]
-    [#return result]
-[/#function]
-
-[#function getCMDBSegmentPlacementContent tenant product environment segment account region cacheResult=false ]
-    [#-- Check cache --]
-    [#if cmdbCacheAll || cacheResult]
-        [#local result = getCMDBCacheSegmentSection(tenant, product, environment, segment, ["Placements", account, region]) ]
-        [#if result?has_content]
-            [#return result]
-        [/#if]
-    [/#if]
-
-    [#-- Assemble files --]
-    [#local files = analyseCMDBSegmentFiles(tenant, product, environment, segment, {}, cacheResult) ]
-
-    [#-- Assemble content --]
-    [#local result = internalAssembleCMDBDefinitions(files.Definitions, account, region) ]
-    [#if cmdbCacheAll || cacheResult]
-        [#assign cmdbCache =
-            addToCache(
-                cmdbCache,
-                {
-                    "Tenants" : {
-                        tenant : {
-                            "Products" : {
-                                product : {
-                                    "Environments" : {
-                                        environment : {
-                                            "Segments" : {
-                                                segment : {
-                                                    "Placements" : {
+                                                    "Accounts" : {
                                                         account : {
-                                                            region : result
+                                                            "Regions" : {
+                                                                region : {
+                                                                    "Content" : result
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -729,18 +747,6 @@ Options are
 -- Internal support functions for cmdb processing --
 ----------------------------------------------------]
 
-[#function internalFilterCMDBIgnoreFiles matches]
-    [#return matches?filter(match -> match.IsDirectory) ]
-[/#function]
-
-[#function internalFilterCMDBIgnoreDirectories matches]
-    [#return matches?filter(match -> !match.IsDirectory) ]
-[/#function]
-
-[#function internalFilterCMDBIncludesOnly matches]
-    [#return matches?filter(match -> match.IsTemplate!false) ]
-[/#function]
-
 [#function internalFilterCMDBFilenamesOnly matches flatten=false]
     [#local result = [] ]
     [#list matches as match ]
@@ -751,14 +757,6 @@ Options are
         [/#if]
     [/#list]
     [#return result]
-[/#function]
-
-[#function internalFilterCMDBContentOnly matches ]
-    [#return matches?filter(match -> match.Contents?has_content) ]
-[/#function]
-
-[#function internalFilterCMDBJSONContentOnly matches ]
-    [#return matches?filter(match -> match.ContentsAsJSON?has_content) ]
 [/#function]
 
 [#function internalFilterCMDBSuppressContent matches ]
@@ -831,12 +829,12 @@ Options are
             regex,
             options +
             {
+                "IgnoreDirectories" : true,
+                "AddStartingWildcard" : false,
                 "AddEndingWildcard" : false
             },
             filters +
             {
-                "AddStartingWildcard" : false,
-                "IgnoreDirectories" : true,
                 "JSONContentOnly" : true
             }
         )
@@ -851,13 +849,13 @@ Options are
             alternatives,
             options +
             {
+                "AddStartingWildcard" : false,
+                "IgnoreDirectories" : true,
                 "FilenameGlob" : "*.ftl",
                 "IncludeCMDBInformation" : true
             },
             filters +
             {
-                "AddStartingWildcard" : false,
-                "IgnoreDirectories" : true,
                 "IncludeContentOnly" : true,
                 [#-- Only interested in Include attribute --]
                 "SuppressContent" : true
@@ -969,27 +967,7 @@ Options are
     [#return result ]
 [/#function]
 
-[#-- More detailed processing done by stack output handler --]
-[#function  internalAssembleCMDBStackOutputs files ]
-    [#local result = [] ]
-
-    [#list files as file]
-        [#-- Return a simple list of the outputs - the format is opaque at this point --]
-        [#local result +=
-            [
-                {
-                    "FilePath" : file.Path,
-                    "FileName" : file.Filename,
-                    "Content" : [file.ContentsAsJSON!{}]
-                }
-            ]
-        ]
-    [/#list]
-
-    [#return result ]
-[/#function]
-
-[#function internalAssembleCMDBDefinitions files account region ]
+[#function internalAssembleCMDBDefinitions files account="" region="" ]
     [#local result = {} ]
 
     [#list files as file]
@@ -1013,25 +991,13 @@ Options are
         [#local result += file.Contents ]
     [/#list]
 
-    [#-- FTL directive left off the front so we can directly interpret the code via the ?interpret directive --]
-    [#return
-        valueIfContent(
-            [
-                [#-- r"[#ftl]", --]
-                r'[@debug message="Fragment Id" context=fragmentId enabled=true /]',
-                r"[#switch fragmentId]",
-                result,
-                r"[/#switch]"
-            ]?join("\n"),
-            result,
-            ""
-        )
-    ]
+    [#-- Let the extension handling convert the fragments into a template --]
+    [#return result]
 [/#function]
 
 
 [#function internalAssembleCMDBTenantFiles tenant filters={} ]
-    [#local tenantSection = getCMDBCacheTenantSection(tenant)!{}]
+    [#local tenantSection = getCMDBCacheTenantSection(tenant) ]
     [#return
         {
             "Blueprint" :
@@ -1044,16 +1010,16 @@ Options are
                     },
                     filters
                 ),
-            "Extensions" :
+            "Modules" :
                 internalAssembleCMDBIncludeFiles(
-                    (tenantSection.Paths.Extensions)!"",
+                    (tenantSection.Paths.Modules)!"",
                     [ [] ],
                     {},
                     filters
                 ),
-            "Modules" :
+            "Extensions" :
                 internalAssembleCMDBIncludeFiles(
-                    (tenantSection.Paths.Modules)!"",
+                    (tenantSection.Paths.Extensions)!"",
                     [ [] ],
                     {},
                     filters
@@ -1062,8 +1028,17 @@ Options are
     ]
 [/#function]
 
-[#function internalAssembleCMDBAccountFiles tenant account filters={} ]
-    [#local accountSection = getCMDBCacheAccountSection(tenant, account)!{}]
+[#function internalAssembleCMDBAccountFiles tenant account region filters={} ]
+    [#local accountSection = getCMDBCacheAccountSection(tenant, account) ]
+
+    [#-- File match based on account and region if provided  --]
+    [#local inPlacementFile = [r"[^/]+"] ]
+    [#list [account, region] as part]
+        [#if part?has_content]
+            [#local inPlacementFile += [part] ]
+        [/#if]
+    [/#list]
+    [#local inPlacementFile = (inPlacementFile + [r"[^/]+"])?join("-") ]
 
     [#return
         {
@@ -1085,13 +1060,11 @@ Options are
                             [ ["shared", r"[^/]+"] ],
                             {
                                 "AddStartingWildcard" : false,
+                                "IgnoreDirectories" : true,
                                 "MinDepth" : 2,
                                 "MaxDepth" : 2
                             },
-                            filters +
-                            {
-                                "IgnoreDirectories" : true
-                            }
+                            filters
                         ),
                     "Base" : (accountSection.Paths.Settings.Config)!""
                 },
@@ -1102,41 +1075,37 @@ Options are
                             [ ["shared", r"[^/]+"] ],
                             {
                                 "AddStartingWildcard" : false,
+                                "IgnoreDirectories" : true,
                                 "MinDepth" : 2,
                                 "MaxDepth" : 2
                             },
-                            filters +
-                            {
-                                "IgnoreDirectories" : true
-                            }
+                            filters
                         ),
                     "Base" : (accountSection.Paths.Settings.Operations)!""
                 }
             ],
-            "StackOutputs" :
+            "Stacks" :
                 findCMDBMatches(
                     (accountSection.Paths.State)!"",
-                    [ [r"[^/]+", "shared", r".+"] ],
+                    [ [r"[^/]+", "shared", r".+", inPlacementFile] ],
                     {
                         "AddStartingWildcard" : false,
-                        "AddEndingWildcard" : false
-                    },
-                    filters +
-                    {
+                        "AddEndingWildcard" : false,
                         "IgnoreDirectories" : true,
                         "FilenameGlob" : "*-stack.json"
-                    }
-                ),
-            "Extensions" :
-                internalAssembleCMDBIncludeFiles(
-                    (accountSection.Paths.Extensions)!"",
-                    [ [] ],
-                    {},
+                    },
                     filters
                 ),
             "Modules" :
                 internalAssembleCMDBIncludeFiles(
                     (accountSection.Paths.Modules)!"",
+                    [ [] ],
+                    {},
+                    filters
+                ),
+            "Extensions" :
+                internalAssembleCMDBIncludeFiles(
+                    (accountSection.Paths.Extensions)!"",
                     [ [] ],
                     {},
                     filters
@@ -1146,11 +1115,12 @@ Options are
 [/#function]
 
 [#function internalAssembleCMDBProductFiles tenant product filters={} ]
+    [#local productSection = getCMDBCacheProductSection(tenant, product) ]
     [#return
         {
             "Blueprint" :
                 internalAssembleCMDBJSONFiles(
-                    (getCMDBCacheProductSection(tenant, product).Paths.Marker)!"",
+                    (productSection.Paths.Marker)!"",
                     [ [] ],
                     {
                         "MinDepth" : 1,
@@ -1158,16 +1128,16 @@ Options are
                     },
                     filters
                 ),
-            "Extensions" :
+            "Modules" :
                 internalAssembleCMDBIncludeFiles(
-                    (accountSection.Paths.Extensions)!"",
+                    (productSection.Paths.Modules)!"",
                     [ [] ],
                     {},
                     filters
                 ),
-            "Modules" :
+            "Extensions" :
                 internalAssembleCMDBIncludeFiles(
-                    (accountSection.Paths.Modules)!"",
+                    (productSection.Paths.Extensions)!"",
                     [ [] ],
                     {},
                     filters
@@ -1176,26 +1146,48 @@ Options are
     ]
 [/#function]
 
-[#function internalAssembleCMDBSegmentFiles tenant product environment segment filters={} ]
-    [#local productSection = getCMDBCacheProductSection(tenant, product)!{} ]
+[#function internalAssembleCMDBSegmentFiles tenant product environment segment account="" region="" filters={} ]
+    [#local productSection = getCMDBCacheProductSection(tenant, product) ]
+
+    [#local knownEnvironments = getCMDBEnvironments(tenant,product) ]
+    [#local knownEnvironment = knownEnvironments?seq_contains(environment) ]
+
+    [#local knownSegments = getCMDBSegments(tenant, product, environment) ]
+    [#local knownSegment = knownSegments?seq_contains(segment) ]
 
     [#-- Check for a directory that isn't one of the other segments --]
     [#local ignoreOtherSegmentsRegex =
         "(?!(" +
-        removeValueFromArray(getCMDBSegments(tenant, product, environment), segment)?join("|") +
+        removeValueFromArray(knownSegments, segment)?join("|") +
         ")/).+" ]
+
+    [#-- File match based on account and region if provided  --]
+    [#local inPlacementFile = [r"[^/]+"] ]
+    [#list [account, region] as part]
+        [#if part?has_content]
+            [#local inPlacementFile += [part] ]
+        [/#if]
+    [/#list]
+    [#local inPlacementFile = (inPlacementFile + [r"[^/]+"])?join("-") ]
 
     [#return
         {
             "Blueprint" :
                 internalAssembleCMDBJSONFiles(
                     (productSection.Paths.Infrastructure.Solutions)!"",
-                    [
-                        ["shared"],
-                        ["shared", segment],
-                        [environment],
-                        [environment, segment]
-                    ],
+                    [ ["shared"] ] +
+                    arrayIfTrue(
+                        [ ["shared", segment] ],
+                        knownSegment
+                    ) +
+                    arrayIfTrue(
+                        [ [environment] ] +
+                        arrayIfTrue(
+                            [ [environment, segment] ],
+                            knownSegment
+                        ),
+                        knownEnvironment
+                    )
                     {},
                     filters
                 ),
@@ -1204,18 +1196,25 @@ Options are
                     "Files" :
                         findCMDBMatches(
                             (productSection.Paths.Settings.Config)!"",
-                            [
-                                ["shared", ignoreOtherSegmentsRegex],
-                                [environment, ignoreOtherSegmentsRegex]
-                            ],
+                            arrayIfTrue(
+                                [ ["shared", ignoreOtherSegmentsRegex] ],
+                                knownSegment,
+                                [ ["shared", r"[^/]+"] ]
+                            ) +
+                            arrayIfTrue(
+                                arrayIfTrue(
+                                    [ [environment, ignoreOtherSegmentsRegex] ],
+                                    knownSegment,
+                                    [ [environment, r"[^/]+"] ]
+                                ),
+                                knownEnvironment
+                            ),
                             {
                                 "AddStartingWildcard" : false,
-                                "AddEndingWildcard" : false
-                            },
-                            filters +
-                            {
+                                "AddEndingWildcard" : false,
                                 "IgnoreDirectories" : true
-                            }
+                            },
+                            filters
 
                         ),
                     "Base" : (productSection.Paths.Settings.Config)!""
@@ -1224,18 +1223,25 @@ Options are
                     "Files" :
                         findCMDBMatches(
                             (productSection.Paths.Infrastructure.Builds)!"",
-                            [
-                                ["shared", ignoreOtherSegmentsRegex],
-                                [environment, ignoreOtherSegmentsRegex]
-                            ],
+                            arrayIfTrue(
+                                [ ["shared", ignoreOtherSegmentsRegex] ],
+                                knownSegment,
+                                [ ["shared", r"[^/]+"] ]
+                            ) +
+                            arrayIfTrue(
+                                arrayIfTrue(
+                                    [ [environment, ignoreOtherSegmentsRegex] ],
+                                    knownSegment,
+                                    [ [environment, r"[^/]+"] ]
+                                ),
+                                knownEnvironment
+                            ),
                             {
                                 "AddStartingWildcard" : false,
-                                "AddEndingWildcard" : false
-                            },
-                            filters +
-                            {
+                                "AddEndingWildcard" : false,
                                 "IgnoreDirectories" : true
-                            }
+                            },
+                            filters
                         ),
                     "Base" : (productSection.Paths.Infrastructure.Builds)!""
                 },
@@ -1243,76 +1249,95 @@ Options are
                     "Files" :
                         findCMDBMatches(
                             (productSection.Paths.Settings.Operations)!"",
-                            [
-                                ["shared", ignoreOtherSegmentsRegex],
-                                [environment, ignoreOtherSegmentsRegex]
-                            ],
+                            arrayIfTrue(
+                                [ ["shared", ignoreOtherSegmentsRegex] ],
+                                knownSegment,
+                                [ ["shared", r"[^/]+"] ]
+                            ) +
+                            arrayIfTrue(
+                                arrayIfTrue(
+                                    [ [environment, ignoreOtherSegmentsRegex] ],
+                                    knownSegment,
+                                    [ [environment, r"[^/]+"] ]
+                                ),
+                                knownEnvironment
+                            ),
                             {
                                 "AddStartingWildcard" : false,
-                                "AddEndingWildcard" : false
-                            },
-                            filters +
-                            {
+                                "AddEndingWildcard" : false,
                                 "IgnoreDirectories" : true
-                            }
+                            },
+                            filters
                         ),
                     "Base" : (productSection.Paths.Settings.Operations)!""
                 }
             ],
-            "StackOutputs" :
+            "Stacks" :
                 findCMDBMatches(
                     (productSection.Paths.State)!"",
-                    [
-                        [r"[^/]+", "shared", r"[^/]+"],
-                        [r"[^/]+", "shared", segment, r".+"],
-                        [r"[^/]+", environment, r"[^/]+"],
-                        [r"[^/]+", environment, segment, r".+"]
-                    ],
+                    arrayIfTrue(
+                        [
+                            [r"[^/]+", environment, segment, inPlacementFile],
+                            [r"[^/]+", environment, segment, r".+", inPlacementFile]
+                        ],
+                        knownEnvironment && knownSegment
+                    ),
                     {
                         "AddStartingWildcard" : false,
-                        "AddEndingWildcard" : false
-                    },
-                    filters +
-                    {
+                        "AddEndingWildcard" : false,
                         "IgnoreDirectories" : true,
                         "FilenameGlob" : "*-stack.json"
-                    }
+                    },
+                    filters
                 ),
             "Definitions" :
                 findCMDBMatches(
                     (productSection.Paths.State)!"",
-                    [
-                        [r"[^/]+", "shared", r"[^/]+"],
-                        [r"[^/]+", "shared", segment, r".+"],
-                        [r"[^/]+", environment, r"[^/]+"],
-                        [r"[^/]+", environment, segment, r".+"]
-                    ],
+                    [ [r"[^/]+", "shared", inPlacementFile] ] +
+                    arrayIfTrue(
+                        [ [r"[^/]+", "shared", segment, r".+", inPlacementFile] ],
+                        knownSegment
+                    ) +
+                    arrayIfTrue(
+                        [ [r"[^/]+", environment, inPlacementFile] ] +
+                        arrayIfTrue(
+                            [ [r"[^/]+", environment, segment, r".+", inPlacementFile] ],
+                            knownSegment
+                        ),
+                        knownEnvironment
+                    ),
                     {
                         "AddStartingWildcard" : false,
-                        "AddEndingWildcard" : false
-                    },
-                    filters +
-                    {
+                        "AddEndingWildcard" : false,
                         "IgnoreDirectories" : true,
                         "FilenameGlob" : "*-definition.json"
-                    }
+                    },
+                    filters
                 ),
             "Fragments" :
                 findCMDBMatches(
                     (productSection.Paths.Infrastructure.Solutions)!"",
-                    [
-                        ["shared", r"[^/]+"],
-                        ["shared", segment, r"[^/]+"],
-                        [environment, r"[^/]+"],
-                        [environment, segment, r"[^/]+"]
-                    ],
+                    [ ["shared", r"[^/]+"] ] +
+                    arrayIfTrue(
+                        [ ["shared", segment, r"[^/]+"] ],
+                        knownSegment
+                    ) +
+                    arrayIfTrue(
+                        [ [environment, r"[^/]+"] ] +
+                        arrayIfTrue(
+                            [ [environment, segment, r"[^/]+"] ],
+                            knownSegment
+                        ),
+                        knownEnvironment
+                    ),
                     {
                         "AddStartingWildcard" : false,
                         "AddEndingWildcard" : false,
                         "IgnoreDirectories" : true,
                         "FilenameGlob" : "fragment_*.ftl",
                         "IncludeCMDBInformation" : true
-                    }
+                    },
+                    filters
                 )
 
         }
@@ -1353,11 +1378,9 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 2,
                             "MaxDepth" : 2
-                        },
-                        {
-                            "IgnoreFiles" : true
                         }
                     )
                 ]
@@ -1370,11 +1393,9 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 2,
                             "MaxDepth" : 2
-                        },
-                        {
-                            "IgnoreFiles" : true
                         }
                     )
                 ]
@@ -1387,11 +1408,9 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 2,
                             "MaxDepth" : 2
-                        },
-                        {
-                            "IgnoreFiles" : true
                         }
                     )
                 ]
@@ -1404,11 +1423,9 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 2,
                             "MaxDepth" : 2
-                        },
-                        {
-                            "IgnoreFiles" : true
                         }
                     )
                 ]
@@ -1421,11 +1438,9 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 1,
                             "MaxDepth" : 1
-                        },
-                        {
-                            "IgnoreFiles" : true
                         }
                     )
                 ]
@@ -1437,12 +1452,10 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 1,
                             "MaxDepth" : 1
-                        },
-                        {
-                            "IgnoreFiles" : true
-                       }
+                        }
                     )
                 ]
                 [#local modules =
@@ -1453,12 +1466,10 @@ Options are
                         ],
                         {
                             "AddStartingWildcard" : false,
+                            "IgnoreFiles" : true,
                             "MinDepth" : 1,
                             "MaxDepth" : 1
-                        },
-                        {
-                            "IgnoreFiles" : true
-                       }
+                        }
                     )
                 ]
 
@@ -1474,9 +1485,7 @@ Options are
                                     ["config", ".*", name, "settings"]
                                 ],
                                 {
-                                    "AddStartingWildcard" : true
-                                },
-                                {
+                                    "AddStartingWildcard" : true,
                                     "IgnoreFiles" : true
                                 }
                             )
@@ -1492,9 +1501,6 @@ Options are
                                     [name, "infrastructure", "operations"],
                                     ["infrastructure", ".*", name, "operations"]
                                 ],
-                                {
-                                    "AddStartingWildcard" : true
-                                },
                                 {
                                     "IgnoreFiles" : true
                                 }
@@ -1512,9 +1518,6 @@ Options are
                                     ["config", ".*", name, "solutionsv2"]
                                 ],
                                 {
-                                    "AddStartingWildcard" : true
-                                },
-                                {
                                     "IgnoreFiles" : true
                                 }
                             )
@@ -1530,9 +1533,6 @@ Options are
                                     [name, "config", "settings"],
                                     ["config", ".*", name, "settings"]
                                 ],
-                                {
-                                    "AddStartingWildcard" : true
-                                },
                                 {
                                     "IgnoreFiles" : true
                                 }
@@ -1550,9 +1550,6 @@ Options are
                                     ["infrastructure", ".*", name]
                                 ],
                                 {
-                                    "AddStartingWildcard" : true
-                                },
-                                {
                                     "IgnoreFiles" : true
                                 }
                             )
@@ -1567,9 +1564,6 @@ Options are
                                     ["extensions", ".*", name]
                                 ],
                                 {
-                                    "AddStartingWildcard" : true
-                                },
-                                {
                                     "IgnoreFiles" : true
                                 }
                             )
@@ -1583,9 +1577,6 @@ Options are
                                     [name, "modules"],
                                     ["modules", ".*", name]
                                 ],
-                                {
-                                    "AddStartingWildcard" : true
-                                },
                                 {
                                     "IgnoreFiles" : true
                                 }
@@ -1772,7 +1763,7 @@ Options are
 
 [/#function]
 
-[#function internalFindFirstCMDBPath names=[] ]
+[#function internalFindFirstCMDBByName names=[] ]
     [#-- Iterate through the CMDBS to see if one matches the name(s) requested --]
     [#local cmdbs = getCMDBs({"ActiveOnly" : true}) ]
     [#list asArray(names) as name]

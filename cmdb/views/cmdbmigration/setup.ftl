@@ -5,26 +5,22 @@
 [/#macro]
 
 [#macro cmdb_view_default_cmdbmigration_prologue ]
-    [#-- Have the wrapper assess the CMDBs it finds configured --]
-    [@initialiseCMDB /]
-
-    [#-- Now analyse the structure of the CMDBS --]
-    [@analyseCMDBStructure /]
+    [#local options = getCommandLineOptions() ]
 
     [#-- Permit selection of the cmdbs to upgrade --]
     [#local cmdbs = getCMDBs({"ActiveOnly" : false}) ]
-    [#if commandLineOptions.CMDB.Names?has_content]
-        [#local requiredCMDBs = commandLineOptions.CMDB.Names?split("|") ]
+    [#if options.CMDB.Names?has_content]
+        [#local requiredCMDBs = options.CMDB.Names?split("|") ]
         [#local cmdbs = cmdbs?filter(entry -> requiredCMDBs?seq_contains(entry.Name)) ]
     [/#if]
 
-    [#local actions = commandLineOptions.CMDB.Actions?split("|") ]
+    [#local actions = options.CMDB.Actions?split("|") ]
 
     [#list cmdbs as cmdb]
         [#-- Perform migrations --]
         [#if actions?seq_contains("upgrade") ]
             [#local cmdbState = getCMDBs({"ActiveOnly" : false})?filter(entry -> cmdb.Name == entry.Name)[0] ]
-            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_UPGRADE, commandLineOptions.CMDB.Dryrun) ]
+            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_UPGRADE, options) ]
             [@addToDefaultScriptOutput getProgressLog(result) /]
             [#if progressIsNotOK(result) ]
                 [#return]
@@ -34,7 +30,7 @@
         [#-- Perform cleanup --]
         [#if actions?seq_contains("cleanup") ]
             [#local cmdbState = getCMDBs({"ActiveOnly" : false})?filter(entry -> cmdb.Name == entry.Name)[0] ]
-            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_CLEANUP, commandLineOptions.CMDB.Dryrun) ]
+            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_CLEANUP, options) ]
             [@addToDefaultScriptOutput getProgressLog(result) /]
             [#if progressIsNotOK(result) ]
                 [#return]
@@ -51,10 +47,10 @@
 [#assign INTERNAL_CMDB_CLEANUP = "Cleanup"]
 
 [#-- Primary function to perform migration activities --]
-[#function internalMigrateCmdb cmdb action dryrun]
+[#function internalMigrateCmdb cmdb action options]
 
     [#local result = createProgressIndicator() ]
-
+    [#local dryrun = options.CMDB.Dryrun ]
     [#--
     Migrations from the following earlier versions have been ported from
     the bash implementation, but not extensively tested as there is no
@@ -84,7 +80,7 @@
     [#local pinnedVersion = (contents.Pin[action])!""]
 
     [#-- Determine the requested version --]
-    [#local requestedVersion = commandLineOptions.CMDB.Version[action] ]
+    [#local requestedVersion = options.CMDB.Version[action] ]
 
     [#-- Support forced migrations by setting pinned versions --]
     [#if pinnedVersion?has_content]
