@@ -22,6 +22,12 @@
     [#local account = getFilterAttributePrimaryValue(filter, "Account") ]
     [#local region = getFilterAttributePrimaryValue(filter, "Region") ]
 
+    [#-- Apply defaults --]
+    [#-- If no tenant provided and only one available, use it --]
+    [#if (! tenant?has_content) && (getCMDBTenants()?size == 1) ]
+        [#local tenant = getCMDBTenants()[0] ]
+    [/#if]
+
     [#-- Determine the available content --]
     [#local tenantContent = getCMDBTenantContent(tenant) ]
     [#local accountContent = getCMDBAccountContent(tenant, account, region) ]
@@ -39,8 +45,8 @@
     ]
     [#local settingsContent =
         mergeObjects(
-            accountContent.Settings,
-            segmentContent.Settings
+            internalReformatAccountSettings(account, accountContent.Settings),
+            internalReformatProductSettings(product, segmentContent.Settings)
         )
     ]
     [#local definitionsContent = segmentContent.Definitions ]
@@ -141,3 +147,66 @@
     [#return result]
 
 [/#function]
+
+[#----------------------------------------------
+-- Internal support functions for cmdb seeder --
+------------------------------------------------]
+[#-- TODO(mfl) Remove these once composite inputs decommissioned --]
+[#function internalReformatAccountSettings key cmdbSettings]
+    [#local settings = {} ]
+    [#list cmdbSettings.General as namespace,value]
+        [#local settings +=
+            {
+                formatName(key,namespace) : value
+            }
+        ]
+    [/#list]
+    [#return
+        {
+            "Settings" : {
+                "Accounts" : settings
+            }
+        }
+    ]
+[/#function]
+
+[#function internalReformatProductSettings key cmdbSettings]
+    [#local settings = {} ]
+    [#list cmdbSettings.General as namespace,value]
+        [#local settings +=
+            {
+                formatName(key,namespace) : value
+            }
+        ]
+    [/#list]
+    [#local builds = {} ]
+    [#list cmdbSettings.Builds as namespace,value]
+        [#local builds +=
+            {
+                formatName(key,namespace) : value
+            }
+        ]
+    [/#list]
+    [#local sensitive = {} ]
+    [#list cmdbSettings.Sensitive as namespace,value]
+        [#local sensitive +=
+            {
+                formatName(key,namespace) : value
+            }
+        ]
+    [/#list]
+    [#return
+        {
+            "Settings" : {
+                "Products" : settings
+            },
+            "Builds" : {
+                "Products" : builds
+            },
+            "Sensitive" : {
+                "Products" : sensitive
+            }
+        }
+    ]
+[/#function]
+
