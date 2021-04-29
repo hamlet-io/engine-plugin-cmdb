@@ -1033,11 +1033,15 @@ Filters are as per filterCMDBMatches()
 
     [#-- File match based on account and region if provided  --]
     [#local inPlacementFile = [r"[^/]+"] ]
-    [#list [account, region] as part]
+
+    [#-- TODO(mfl) Uncomment this once placements work correctly --]
+    [#-- Current logic relies on not explicitly checking region  when --]
+    [#-- deploying to different regions --]
+    [#--list [account, region] as part]
         [#if part?has_content]
             [#local inPlacementFile += [part] ]
         [/#if]
-    [/#list]
+    [/#list--]
     [#local inPlacementFile = (inPlacementFile + [r"[^/]+"])?join("-") ]
 
     [#return
@@ -1163,11 +1167,14 @@ Filters are as per filterCMDBMatches()
 
     [#-- File match based on account and region if provided  --]
     [#local inPlacementFile = [r"[^/]+"] ]
-    [#list [account, region] as part]
+    [#-- TODO(mfl) Uncomment this once placements work correctly --]
+    [#-- Current logic relies on not explicitly checking region  when --]
+    [#-- deploying to different regions --]
+    [#--list [account, region] as part]
         [#if part?has_content]
             [#local inPlacementFile += [part] ]
         [/#if]
-    [/#list]
+    [/#list--]
     [#local inPlacementFile = (inPlacementFile + [r"[^/]+"])?join("-") ]
 
     [#return
