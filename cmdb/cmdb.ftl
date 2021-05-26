@@ -972,10 +972,11 @@ Filters are as per filterCMDBMatches()
 
     [#list files as file]
         [#local content = file.ContentsAsJSON!{} ]
-        [#-- Ignore if not using a definition structure which includes account and region --]
-        [#if (content[account][region])?has_content]
-            [#local result = mergeObjects(result, content) ]
+        [#-- Ignore if account and region specified and definition structure isn't specific --]
+        [#if account?has_content && region?has_content && (!(content[account][region])?has_content) ]
+            [#continue]
         [/#if]
+        [#local result = mergeObjects(result, content) ]
     [/#list]
 
     [#return result ]
