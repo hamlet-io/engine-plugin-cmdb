@@ -1,6 +1,7 @@
 # Hamlet Engine Plugin - CMDB
 
 This is a plugin for the hamlet engine which provides configuration database (cmdb) support including
+
 - analysis
 - config pipeline seeding
 - migrations
@@ -9,7 +10,6 @@ This is a plugin for the hamlet engine which provides configuration database (cm
 It provides one provider
 
 - **cmdb** - which implements the actual processing
-
 
 ## Implementation
 
@@ -58,15 +58,35 @@ They should be run from the directory where the cmdbs repos has been checked out
 
 ## Installation
 
-1. Clone this repository into your hamlet workspace
-2. Add the path to the cloned location to the `GENERATION_PLUGINS_DIR` env var
+### Local clone
 
-    ```bash
-    export GENERATION_PLUGINS_DIR="$(pwd);${GENERATION_PLUGINS_DIR}
-    ```
+Run the following commands in your hamlet workspace to install a local copy
 
-3. The plugin will now be available to hamlet and can be included as a provider via `-p cmdb`.
+```bash
+cmdb_clone_dir=< a path where you want to clone the plugin>
+git clone "https://github.com/hamlet-io/engine-plugin-cmdb"
+export GENERATION_PLUGIN_DIRS="${GENERATION_PLUGIN_DIRS};${cmdb_clone_dir}"
+```
 
-## Testing
+The CMDB plugin will be automatically included if it is found on the GENERATION_PLUGINS_DIR path
+
+To update cd into the repo where you cloned the plugin and run `git pull` ( hamlet plugins don't need to be compiled)
+
+### Usage
+
+This is a plugin for the hamlet engine and won't work by itself. Usage of this provider requires the other parts of hamlet deploy
+
+See https://docs.hamlet.io for more information
+
+### Contributing
+
+When contributing to hamlet we recommend installing this plugin using the **Local Clone** method above using a fork of the repository
+
+#### Testing
 
 `test/test_snippets.sh` contains some example command lines used to test the provider both via `createTemplate.sh` and directly via `freemarker-wrapper.jar`. `test/test.ftl` contains a simple freemarker script to exercise the functions provided by the plugin.
+
+##### Submitting Changes
+
+Changes to the plugin are made through pull requests to this repo and all commits should use the [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) format
+This allows us to generate changelogs automatically and to understand what changes have been made
