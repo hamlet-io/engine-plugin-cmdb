@@ -660,8 +660,10 @@ be performed manually and the cmdb version manually updated
             [/#if]
         [/#if]
 
-        [#-- Copy the builds into their own tree --]
-        [#local buildFiles = findFiles(configDir, "*build.json") ]
+        [#-- Copy the builds into their own tree.                               --]
+        [#-- Start under settings so relative paths correct for the builds tree --]
+        [#local settingsDir = formatAbsolutePath(configDir, "settings") ]
+        [#local buildFiles = findFiles(settingsDir, "*build.json") ]
         [#local buildsDir = (listDirectoriesInDirectory(infrastructureDir.File, "builds")[0])!{} ]
         [#if ! buildsDir?has_content]
             [#local targetDir = formatAbsolutePath(infrastructureDir.File, "builds") ]
@@ -670,7 +672,7 @@ be performed manually and the cmdb version manually updated
                 copyFiles(
                     result,
                     buildFiles,
-                    configDir,
+                    settingsDir,
                     targetDir,
                     action,
                     dryrun
