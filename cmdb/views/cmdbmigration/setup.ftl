@@ -16,11 +16,10 @@
 
     [#local actions = options.CMDB.Actions?split("|") ]
 
-    [#list cmdbs as cmdb]
+    [#list cmdbs?sort_by("Name") as cmdb]
         [#-- Perform migrations --]
         [#if actions?seq_contains("upgrade") ]
-            [#local cmdbState = getCMDBs({"ActiveOnly" : false})?filter(entry -> cmdb.Name == entry.Name)[0] ]
-            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_UPGRADE, options) ]
+            [#local result = internalMigrateCmdb(cmdb, INTERNAL_CMDB_UPGRADE, options) ]
             [@addToDefaultScriptOutput getProgressLog(result) /]
             [#if progressIsNotOK(result) ]
                 [#return]
@@ -29,8 +28,7 @@
 
         [#-- Perform cleanup --]
         [#if actions?seq_contains("cleanup") ]
-            [#local cmdbState = getCMDBs({"ActiveOnly" : false})?filter(entry -> cmdb.Name == entry.Name)[0] ]
-            [#local result = internalMigrateCmdb(cmdbState, INTERNAL_CMDB_CLEANUP, options) ]
+            [#local result = internalMigrateCmdb(cmdb, INTERNAL_CMDB_CLEANUP, options) ]
             [@addToDefaultScriptOutput getProgressLog(result) /]
             [#if progressIsNotOK(result) ]
                 [#return]
@@ -70,7 +68,7 @@
             "Cleanup" : ["v1.1.1", "v2.0.0"]
         } ]
 
-    [#-- Access current .cmdb file --]
+    [#-- Access current version state --]
     [#local contents = cmdb.ContentsAsJSON!{} ]
 
     [#-- Determine the version of last upgrade --]
@@ -94,6 +92,7 @@
         [
             "#",
             "#",
+            "# " + .now?iso_utc,
             "# " + action + " cmdb " + cmdb.Name +
                 ", path = " + cmdb.FileSystemPath +
                 ", requested = " + requestedVersion +
@@ -162,15 +161,34 @@
             [#local result = (.vars[migrationFunction])(result, cmdb, dryrun) ]
 
             [#if progressIsOK(result)]
-                [#-- Repeat the header so it is easier to understand the log --]
+                [#-- Repeat the header on the next migration so it is easier to understand the log --]
                 [#local addHeader = true]
 
+                [#-- Capture the results of the migration --]
+                [#local result += {"Log" : result.Log + logSeparator("Capture results") } ]
+
+                [#-- Clean up any legacy .cmdb files - should only be one --]
+                [#local markerFiles = listFilesInDirectory(cmdb.CMDBPath, r"\.cmdb", {"IgnoreDotFiles" : false}) ]
+                [#if markerFiles?has_content]
+                    [#local result = deleteFiles(result, markerFiles, action, dryrun) ]
+                    [#if progressIsNotOK(result)]
+                        [#break]
+                    [/#if]
+                [/#if]
+
+                [#-- Create the .cmdb directory --]
+                [#local cmdbConfigPath = formatAbsolutePath(cmdb.CMDBPath, ".cmdb") ]
+                [#local cmdbConfigFile = formatAbsolutePath(cmdbConfigPath, "config.json") ]
+                [#local result = makeDirectory(result, cmdbConfigPath, action, dryrun) ]
+                [#if progressIsNotOK(result)]
+                    [#break]
+                [/#if]
+
                 [#-- Update the cmdb contents --]
-                [#local cmdbFile = formatAbsolutePath(cmdb.CMDBPath, ".cmdb") ]
                 [#local result =
                     writeFile(
-                        addToProgressLog(result, ["#"]),
-                        cmdbFile,
+                        result,
+                        cmdbConfigFile,
                         mergeObjects(
                             contents,
                             {
@@ -180,13 +198,33 @@
                             }
                         ),
                         "Update",
-                        "version=" + migrationVersion,
+                        action?lower_case + "=" + migrationVersion,
                         dryrun
                     )
                 ]
                 [#if progressIsNotOK(result)]
                     [#break]
                 [/#if]
+
+                [#-- Capture the migration log in the .cmdb directory                   --]
+                [#-- Append to the file in case there is already one present, e.g. when --]
+                [#-- rerunning the migration                                            --]
+                [#local migrationLogFilename = action?lower_case + "-" + migrationVersion + ".log" ]
+                [#local result =
+                    writeFile(
+                        result,
+                        formatAbsolutePath(cmdbConfigPath, migrationLogFilename),
+                        result,
+                        "Create",
+                        "migration log",
+                        dryrun,
+                        true
+                    )
+                ]
+                [#if progressIsNotOK(result)]
+                    [#break]
+                [/#if]
+
             [#else]
                 [#-- Stop as migration failed --]
                 [#local result = addToProgressLog(result,["#", logAlert("Aborting due to migration failure"), "#"]) ]
@@ -359,6 +397,7 @@ Introduce directory for shared configuration
                                             )
                                     },
                                 "Cleanup",
+                                "",
                                 dryrun
                             )
                         ]
@@ -1699,7 +1738,7 @@ Move directory tree
 [/#function]
 
 [#-- Write file --]
-[#function writeFile progress file content action description dryrun]
+[#function writeFile progress file content action description dryrun append=false]
 
     [#local result = setProgressOK(progress) ]
 
@@ -1711,14 +1750,24 @@ Move directory tree
                     file,
                     content,
                     {
-                        "Format" : "json"
+                        "Format" : "json",
+                        "Append" : append
                     }
                 )
             )
         ]
     [/#if]
 
-    [#return addToProgressLog(result, logStatusEntry(action, file + " (" + description + ")", getProgressStatus(result))) ]
+    [#return
+        addToProgressLog(
+            result,
+            logStatusEntry(
+                action,
+                file + valueIfContent(" (" + description + ")", description, ""),
+                getProgressStatus(result)
+            )
+        )
+    ]
 [/#function]
 
 [#--
