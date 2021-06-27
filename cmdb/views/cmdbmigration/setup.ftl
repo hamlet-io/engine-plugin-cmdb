@@ -165,7 +165,7 @@
                 [#local addHeader = true]
 
                 [#-- Capture the results of the migration --]
-                [#local result += {"Log" : result.Log + logSeparator("Capture results") } ]
+                [#local result += {"Log" : result.Log + logSeparator("Record results") } ]
 
                 [#-- Clean up any legacy .cmdb files - should only be one --]
                 [#local markerFiles = listFilesInDirectory(cmdb.CMDBPath, r"\.cmdb", {"IgnoreDotFiles" : false}) ]
