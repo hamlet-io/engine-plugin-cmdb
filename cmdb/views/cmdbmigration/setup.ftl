@@ -220,7 +220,7 @@
                     writeFile(
                         result,
                         formatAbsolutePath(cmdbMigrationsLogPath, migrationLogFilename),
-                        getJSON((getProgressLog(result) + ["#", "#"])?join('\n')),
+                        (getProgressLog(result) + ["#", "#"])?join('\n'),
                         "Create",
                         "migration log",
                         dryrun,
@@ -1483,7 +1483,14 @@ Make Directory
     [#local result = setProgressOK(progress) ]
 
     [#-- Nothing to do if it already exists --]
-    [#if findDirectoryMatches(dir, {"StopAfterFirstMatch" : true})?has_content ]
+    [#if findDirectories(
+            dir?keep_before_last('/'),
+            dir?keep_after_last('/'),
+            {
+                "IgnoreDotDirectories" : false,
+                "StopAfterFirstMatch" : true
+            }
+        )?has_content ]
         [#return result]
     [/#if]
 
