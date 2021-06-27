@@ -209,16 +209,25 @@
                 [#-- Capture the migration log in the .cmdb directory                   --]
                 [#-- Append to the file in case there is already one present, e.g. when --]
                 [#-- rerunning the migration                                            --]
+                [#local cmdbMigrationsLogPath = formatAbsolutePath(cmdbConfigPath, "migrations") ]
+                [#local result = makeDirectory(result, cmdbMigrationsLogPath, action, dryrun) ]
+                [#if progressIsNotOK(result)]
+                    [#break]
+                [/#if]
+
                 [#local migrationLogFilename = action?lower_case + "-" + migrationVersion + ".log" ]
                 [#local result =
                     writeFile(
                         result,
-                        formatAbsolutePath(cmdbConfigPath, migrationLogFilename),
-                        result,
+                        formatAbsolutePath(cmdbMigrationsLogPath, migrationLogFilename),
+                        getJSON((getProgressLog(result) + ["#", "#"])?join('\n')),
                         "Create",
                         "migration log",
                         dryrun,
-                        true
+                        {
+                            "Format" : "plaintext",
+                            "Append" : true
+                        }
                     )
                 ]
                 [#if progressIsNotOK(result)]
@@ -1738,9 +1747,18 @@ Move directory tree
 [/#function]
 
 [#-- Write file --]
-[#function writeFile progress file content action description dryrun append=false]
+[#function writeFile progress file content action description dryrun options={} ]
 
     [#local result = setProgressOK(progress) ]
+
+    [#local writeOptions =
+        {
+            "Format" : "json",
+            "Formatting" : "pretty",
+            "Append" : false
+        } +
+        options
+    ]
 
     [#if ! dryrun?has_content]
         [#local result =
@@ -1749,10 +1767,7 @@ Move directory tree
                 toCMDB(
                     file,
                     content,
-                    {
-                        "Format" : "json",
-                        "Append" : append
-                    }
+                    writeOptions
                 )
             )
         ]
