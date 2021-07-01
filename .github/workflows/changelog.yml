@@ -3,7 +3,7 @@ name: changelog
 on:
   push:
     branches:
-      - 'master'
+      - 'main'
 
 jobs:
   create_changelog:
