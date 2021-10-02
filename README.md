@@ -58,6 +58,8 @@ They should be run from the directory where the cmdbs repos has been checked out
 
 ## Installation
 
+For details on installing hamlet see the [install guide](https://docs.hamlet.io/docs/getting-started/install) on our docs site.
+
 ### Local clone
 
 Run the following commands in your hamlet workspace to install a local copy
