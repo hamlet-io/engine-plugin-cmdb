@@ -1,12 +1,23 @@
 # Changelog
 
-## Unreleased (2021-07-09)
+## Unreleased (2021-10-04)
+
+#### Refactorings
+
+* fix hamlet pacakge install
+#### Others
+
+* changelog bump ([#11](https://github.com/hamlet-io/engine-plugin-cmdb/issues/11))
+
+Full set of changes: [`8.3.0...9edcfa7`](https://github.com/hamlet-io/engine-plugin-cmdb/compare/8.3.0...9edcfa7)
+
+## 8.3.0 (2021-07-09)
 
 #### Fixes
 
 * (ci): changelog generation branch flag
 
-Full set of changes: [`8.2.1...3344083`](https://github.com/hamlet-io/engine-plugin-cmdb/compare/8.2.1...3344083)
+Full set of changes: [`8.2.1...8.3.0`](https://github.com/hamlet-io/engine-plugin-cmdb/compare/8.2.1...8.3.0)
 
 ## 8.2.1 (2021-07-09)
 
